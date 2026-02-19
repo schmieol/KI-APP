@@ -6,7 +6,7 @@ from PIL import Image
 # Modell laden
 @st.cache_resource
 def load_model():
-    model = tf.keras.Models.load_model("keras_model.h5", compile=False)
+    model = tf.keras.models.load_model("keras_model.h5", compile=False)
     return model
 
 model = load_model()
