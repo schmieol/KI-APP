@@ -1,0 +1,3 @@
+0 Schuh
+1 T Shirt
+2 Trinkflasche
