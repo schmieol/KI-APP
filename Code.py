@@ -2,8 +2,24 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+from supabase import create_client
+import uuid
 
+# ==============================
+# Supabase Verbindung
+# ==============================
+
+SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
+SUPABASE_KEY = "YOUR_ANON_KEY"
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+BUCKET_NAME = "product-images"
+
+# ==============================
 # Modell laden
+# ==============================
+
 @st.cache_resource
 def load_model():
     model = tf.keras.models.load_model("keras_model.h5", compile=False)
@@ -11,7 +27,10 @@ def load_model():
 
 model = load_model()
 
+# ==============================
 # Labels laden
+# ==============================
+
 def load_labels():
     with open("labels.txt", "r") as f:
         labels = f.readlines()
@@ -19,31 +38,83 @@ def load_labels():
 
 labels = load_labels()
 
+# ==============================
 # Bild vorbereiten
+# ==============================
+
 def preprocess_image(image):
-    image = image.resize((224, 224))  # Standardgröße Teachable Machine
+    image = image.resize((224, 224))
     image = np.array(image)
-    image = image.astype(np.float32) / 127.5 - 1  # Normalisierung wie TM
+    image = image.astype(np.float32) / 127.5 - 1
     image = np.expand_dims(image, axis=0)
     return image
 
+# ==============================
+# Bild in Supabase speichern
+# ==============================
+
+def upload_image_to_supabase(file):
+    file_name = f"{uuid.uuid4()}.png"
+
+    supabase.storage.from_(BUCKET_NAME).upload(
+        file_name,
+        file.getvalue(),
+        {"content-type": "image/png"}
+    )
+
+    image_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_name}"
+
+    return image_url
+
+# ==============================
+# Prediction in DB speichern
+# ==============================
+
+def save_prediction(image_url, label, confidence):
+    data = {
+        "image_url": image_url,
+        "predicted_label": label,
+        "confidence": float(confidence)
+    }
+
+    supabase.table("predictions").insert(data).execute()
+
+# ==============================
 # Streamlit UI
+# ==============================
+
 st.title("🧠 Produkt-Klassifizierer")
 st.write("Lade ein Bild hoch (T-Shirt, Trinkflasche oder Schuh).")
 
-uploaded_file = st.file_uploader("Bild auswählen...", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader(
+    "Bild auswählen",
+    type=["jpg", "jpeg", "png"]
+)
 
 if uploaded_file is not None:
+
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Hochgeladenes Bild", use_column_width=True)
 
     processed_image = preprocess_image(image)
+
     prediction = model.predict(processed_image)
 
     predicted_index = np.argmax(prediction)
     predicted_label = labels[predicted_index]
     confidence = prediction[0][predicted_index] * 100
 
-    st.subheader("🔎 Ergebnis:")
+    st.subheader("🔎 Ergebnis")
     st.write(f"**Klasse:** {predicted_label}")
     st.write(f"**Sicherheit:** {confidence:.2f}%")
+
+    # Bild hochladen
+    image_url = upload_image_to_supabase(uploaded_file)
+
+    # Ergebnis speichern
+    save_prediction(image_url, predicted_label, confidence)
+
+    st.success("✅ Bild und Ergebnis wurden in Supabase gespeichert!")
+
+    st.write("📷 Bild URL:")
+    st.write(image_url)
